@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MIS Attendance Generator</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#176b55">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <section class="workspace">
+      <div class="topbar">
+        <div>
+          <p class="eyebrow">Excel GUI</p>
+          <h1>MIS Attendance Generator</h1>
+        </div>
+        <span id="statusPill" class="status-pill">Ready</span>
+      </div>
+
+      <div class="panel">
+        <label class="drop-zone" for="workbookInput" id="dropZone">
+          <input id="workbookInput" type="file" accept=".xlsx,.xlsm">
+          <span class="upload-icon">+</span>
+          <strong>Choose workbook</strong>
+          <small>.xlsx or .xlsm from Raw sheet or HR export</small>
+        </label>
+
+        <div class="controls">
+  <label>
+    Article name
+    <input id="articleName" type="text" value="Soumik Biswas">
+  </label>
+
+  <label>
+    Reporting senior
+    <input id="reportingSenior" type="text" value="CA Somnath Sengupta">
+  </label>
+
+  <label>
+    Month
+    <input id="reportMonth" type="month">
+  </label>
+
+  <label>
+    Default Client Name
+    <select id="defaultClientName">
+      <option value="Oshea Herbal">Oshea Herbal</option>
+      <option value="Kothari Hosiery">Kothari Hosiery</option>
+      <option value="DS Knit">DS Knit</option>
+      <option value="Royal HO" selected>Royal HO</option>
+      <option value="SK Office">SK Office</option>
+      <option value="mPokket">mPokket</option>
+      <option value="Experis">Experis</option>
+      <option value="RSH Global">RSH Global</option>
+      <option value="Primarc Pecan">Primarc Pecan</option>
+      <option value="Mark Steel">Mark Steel</option>
+      <option value="Hyatt Regency">Hyatt Regency</option>
+      <option value="NutraGro">NutraGro</option>
+    </select>
+  </label>
+
+  <label>
+  Custom Client Name
+  <input
+    id="customClientName"
+    type="text"
+    placeholder="Enter custom client name"
+  >
+</label>
+
+<label>
+  Laptop Used
+  <select id="defaultDeviceName">
+    <option value="Personal" selected>Personal</option>
+    <option value="SKA Laptop">SKA Laptop</option>
+  </select>
+</label>
+
+<label style="display:flex; align-items:center; gap:10px;">
+  <input
+    id="removeAllRemarks"
+    type="checkbox"
+    style="width:auto; min-height:auto;"
+  >
+  Remove all auto-generated remarks
+</label>
+</div>
+
+        <div class="actions">
+          <button id="generateBtn" type="button" disabled>Generate Excel</button>
+          <button id="mailBtn" type="button" disabled>Open Email Draft</button>
+        </div>
+      </div>
+
+      <div class="date-tools">
+        <section class="date-tool">
+          <div>
+            <h2>Applied for leave?</h2>
+            <p>Selected dates will keep only Date and Day in the MIS row.</p>
+          </div>
+          <div class="date-entry">
+            <input id="leaveDateInput" type="date" aria-label="Leave date">
+            <button id="addLeaveBtn" type="button">Add Leave</button>
+          </div>
+          <div id="leaveList" class="date-list"></div>
+        </section>
+
+        <section class="date-tool">
+          <div>
+            <h2>Credit Days?</h2>
+            <p>Selected dates will show 1 under Credit Days.</p>
+          </div>
+          <div class="date-entry">
+            <input id="creditDateInput" type="date" aria-label="Credit day date">
+            <button id="addCreditBtn" type="button">Add Credit</button>
+          </div>
+          <div id="creditList" class="date-list"></div>
+        </section>
+      </div>
+
+      <div class="summary-grid">
+        <div>
+          <span>Rows found</span>
+          <strong id="rowsFound">0</strong>
+        </div>
+        <div>
+          <span>Holidays</span>
+          <strong id="holidaysFound">0</strong>
+        </div>
+        <div>
+          <span>Remarks</span>
+          <strong id="remarksFound">0</strong>
+        </div>
+      </div>
+
+      <section class="preview-wrap">
+        <div class="preview-head">
+          <h2>Preview</h2>
+          <span id="fileName">No file selected</span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Day</th>
+                <th>Time In</th>
+                <th>Time Out</th>
+                <th>Client</th>
+                <th>Device</th>
+                <th>Work</th>
+                <th>Credit Days</th>
+                <th>Remarks</th>
+              </tr>
+            </thead>
+            <tbody id="previewBody">
+              <tr><td colspan="9" class="empty">Upload a workbook to preview the report.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
