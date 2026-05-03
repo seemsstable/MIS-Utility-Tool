@@ -26,7 +26,7 @@ This exported Excel file will be used as the source file for MIS generation.
 
 ### Step 2: Upload File
 
-Open the MIS Utility Tool and upload the exported Multiple Check-In Excel file.
+Open the MIS Utility Tool "https://seemsstable.github.io/MIS-Utility-Tool/" and upload the exported Multiple Check-In Excel file.
 
 The tool will automatically read attendance data and generate the monthly MIS preview.
 
