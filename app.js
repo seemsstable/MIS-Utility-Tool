@@ -11,6 +11,8 @@ const state = {
 
   rowClientOverrides: new Map(),
   rowRemarksOverrides: new Map(),
+  rowTimeInOverrides: new Map(),
+  rowTimeOutOverrides: new Map(),
 };
 
 const workbookInput = document.querySelector("#workbookInput");
@@ -18,6 +20,7 @@ const generateBtn = document.querySelector("#generateBtn");
 const mailBtn = document.querySelector("#mailBtn");
 const previewBody = document.querySelector("#previewBody");
 const statusPill = document.querySelector("#statusPill");
+const themeToggle = document.querySelector("#themeToggle");
 const fileName = document.querySelector("#fileName");
 const rowsFound = document.querySelector("#rowsFound");
 const holidaysFound = document.querySelector("#holidaysFound");
@@ -35,10 +38,14 @@ const creditList = document.querySelector("#creditList");
 const defaultClientName = document.querySelector("#defaultClientName");
 const customClientName = document.querySelector("#customClientName");
 const defaultDeviceName = document.querySelector("#defaultDeviceName");
+const gmailAccount = document.querySelector("#gmailAccount");
 const removeAllRemarks = document.querySelector("#removeAllRemarks");
 
 const today = new Date();
-reportMonth.value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+
+reportMonth.value = `${today.getFullYear()}-${String(
+  today.getMonth() + 1
+).padStart(2, "0")}`;
 
 workbookInput.addEventListener("change", async (event) => {
   const [file] = event.target.files;
@@ -46,30 +53,134 @@ workbookInput.addEventListener("change", async (event) => {
   await loadWorkbook(file);
 });
 
+articleName.addEventListener("input", saveGlobalSettings);
+reportingSenior.addEventListener("input", saveGlobalSettings);
+
 generateBtn.addEventListener("click", generateReport);
 mailBtn.addEventListener("click", openMailDraft);
 addLeaveBtn.addEventListener("click", () => addDateOverride("leave", leaveDateInput));
 addCreditBtn.addEventListener("click", () => addDateOverride("credit", creditDateInput));
 
 defaultClientName.addEventListener("change", () => {
+  saveGlobalSettings();
   rebuildReportRows();
   renderPreview();
 });
 
 customClientName.addEventListener("input", () => {
+  saveGlobalSettings();
   rebuildReportRows();
   renderPreview();
 });
 
 defaultDeviceName.addEventListener("change", () => {
+  saveGlobalSettings();
   rebuildReportRows();
   renderPreview();
 });
 
+gmailAccount.addEventListener("input", saveGlobalSettings);
+
 removeAllRemarks.addEventListener("change", () => {
+  saveGlobalSettings();
   rebuildReportRows();
   renderPreview();
 });
+
+loadSavedSettings();
+loadTheme();
+
+themeToggle.addEventListener("click", (event) => toggleTheme(event));
+
+function toggleTheme(event) {
+  const current = document.documentElement.dataset.theme;
+  const next = current === "light" ? "dark" : "light";
+
+  startThemeRipple(event);
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem("mis_theme", next);
+  updateThemeToggleText(next);
+}
+
+function loadTheme() {
+  const saved = localStorage.getItem("mis_theme") || "light";
+
+  document.documentElement.dataset.theme = saved;
+  updateThemeToggleText(saved);
+}
+
+function updateThemeToggleText(theme) {
+  themeToggle.textContent = theme === "dark" ? "Light Mode" : "Dark Mode";
+  themeToggle.setAttribute(
+    "aria-label",
+    theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
+  );
+}
+
+function startThemeRipple(event) {
+  const point = event?.currentTarget?.getBoundingClientRect();
+  const x = point ? point.left + point.width / 2 : window.innerWidth / 2;
+  const y = point ? point.top + point.height / 2 : 28;
+
+  document.body.style.setProperty("--theme-x", `${x}px`);
+  document.body.style.setProperty("--theme-y", `${y}px`);
+  document.body.classList.remove("theme-ripple");
+  void document.body.offsetWidth;
+  document.body.classList.add("theme-ripple");
+
+  window.setTimeout(() => {
+    document.body.classList.remove("theme-ripple");
+  }, 280);
+}
+
+
+function saveGlobalSettings() {
+  localStorage.setItem(
+    "mis_global_settings",
+    JSON.stringify({
+      articleName: articleName.value,
+      reportingSenior: reportingSenior.value,
+      defaultClientName: defaultClientName.value,
+      customClientName: customClientName.value,
+      defaultDeviceName: defaultDeviceName.value,
+      gmailAccount: gmailAccount.value,
+      removeAllRemarks: removeAllRemarks.checked
+    })
+  );
+}
+
+function loadSavedSettings() {
+  const saved = localStorage.getItem("mis_global_settings");
+  if (!saved) return;
+
+  try {
+    const settings = JSON.parse(saved);
+
+    articleName.value =
+      settings.articleName || articleName.value;
+
+    reportingSenior.value =
+      settings.reportingSenior || reportingSenior.value;
+
+    defaultClientName.value =
+      settings.defaultClientName || defaultClientName.value;
+
+    customClientName.value =
+      settings.customClientName || "";
+
+    defaultDeviceName.value =
+      settings.defaultDeviceName || defaultDeviceName.value;
+
+    gmailAccount.value =
+      settings.gmailAccount || settings.gmailAccountIndex || gmailAccount.value;
+
+    removeAllRemarks.checked =
+      settings.removeAllRemarks || false;
+
+  } catch (error) {
+    console.error("Settings load failed", error);
+  }
+}
 
 async function loadWorkbook(file) {
   setStatus("Loading");
@@ -201,18 +312,26 @@ function buildRowsFromRecords(records, fillMissingDates) {
     const selectedMonth = monthInputToDate(reportMonth.value);
 
     if (fillMissingDates) {
-      start = new Date(
-        selectedMonth.getFullYear(),
-        selectedMonth.getMonth(),
-        1
-      );
+  const dates = Array.from(byDate.values()).map(
+    (record) => record.date
+  );
 
-      end = new Date(
-        selectedMonth.getFullYear(),
-        selectedMonth.getMonth() + 1,
-        0
-      );
-    } else {
+  const earliest = new Date(
+    Math.min(...dates.map(d => d.getTime()))
+  );
+
+  start = new Date(
+    earliest.getFullYear(),
+    earliest.getMonth(),
+    earliest.getDate()
+  );
+
+  end = new Date(
+    selectedMonth.getFullYear(),
+    selectedMonth.getMonth() + 1,
+    0
+  );
+} else {
       const dates = Array.from(byDate.values()).map(
         (record) => record.date.getTime()
       );
@@ -270,6 +389,8 @@ const globalClient =
 
   const rowClientOverride = state.rowClientOverrides.get(key);
   const rowRemarksOverride = state.rowRemarksOverrides.get(key);
+  const rowTimeInOverride = state.rowTimeInOverrides.get(key);
+  const rowTimeOutOverride = state.rowTimeOutOverrides.get(key);
 
   if (state.leaveDates.has(key)) {
     return {
@@ -286,24 +407,81 @@ const globalClient =
 
   return {
   ...row,
+
+  timeIn:
+    rowTimeInOverride !== undefined
+      ? rowTimeInOverride
+      : row.timeIn,
+
+  timeOut:
+    rowTimeOutOverride !== undefined
+      ? rowTimeOutOverride
+      : row.timeOut,
+
   client:
-    row.client === "Holiday"
-      ? "Holiday"
-      : (rowClientOverride || globalClient || "Royal HO"),
+  rowClientOverride !== undefined
+    ? rowClientOverride
+    : (
+        row.client === "Holiday"
+          ? "Holiday"
+          : (globalClient || "Royal HO")
+      ),
 
   device:
     row.client === "Holiday"
       ? ""
       : (defaultDeviceName.value || "Personal"),
 
-  remarks:
-  rowRemarksOverride !== undefined
-    ? rowRemarksOverride
-    : (
-        removeAllRemarks.checked
-          ? ""
-          : row.remarks
-      ),
+  remarks: (() => {
+  if (removeAllRemarks.checked) return "";
+
+  if (rowRemarksOverride !== undefined) {
+    return rowRemarksOverride;
+  }
+
+  const finalTimeIn =
+    rowTimeInOverride !== undefined
+      ? parseExcelTime(rowTimeInOverride)
+      : parseExcelTime(row.timeIn);
+
+  const finalTimeOut =
+    rowTimeOutOverride !== undefined
+      ? parseExcelTime(rowTimeOutOverride)
+      : parseExcelTime(row.timeOut);
+
+  const autoRemarks = [];
+
+  if (finalTimeIn && !finalTimeOut) {
+    addUnique(autoRemarks, "Forgot to checkout");
+  }
+
+  if (
+    finalTimeIn &&
+    timeToMinutes(finalTimeIn) > 11 * 60
+  ) {
+    addUnique(autoRemarks, "Thawk problem, communicated");
+  }
+
+  if (
+    finalTimeIn &&
+    finalTimeOut &&
+    Math.abs(
+      timeToMinutes(finalTimeOut) -
+      timeToMinutes(finalTimeIn)
+    ) <= 10
+  ) {
+    addUnique(autoRemarks, "Thawk problem, communicated");
+  }
+
+  if (
+    finalTimeOut &&
+    timeToMinutes(finalTimeOut) < 16 * 60
+  ) {
+    addUnique(autoRemarks, "Half day at client office");
+  }
+
+  return autoRemarks.join(", ");
+})(),
 
   creditDays,
 };
@@ -410,7 +588,6 @@ function buildReportRow(date, timeIn, timeOut) {
     }
 
     if (
-      weekdayName(date) === "Saturday" &&
       timeOut &&
       timeToMinutes(timeOut) < 16 * 60
     ) {
@@ -629,11 +806,70 @@ function renderPreview() {
   }
 
   previewBody.innerHTML = rows.map((row) => `
-    <tr>
+    <tr class="${
+      (() => {
+        const timeInParsed = parseExcelTime(row.timeIn);
+        const timeOutParsed = parseExcelTime(row.timeOut);
+        const timeOutMins = timeOutParsed
+          ? timeToMinutes(timeOutParsed)
+          : null;
+
+        const isLateCheckin =
+  timeInParsed &&
+  timeToMinutes(timeInParsed) > 11 * 60;
+
+const isCheckoutAlert =
+  timeOutParsed &&
+  timeOutMins < 18 * 60;
+
+if (isLateCheckin && isCheckoutAlert) {
+  return "both-alert";
+}
+
+if (isLateCheckin) {
+  return "timein-alert";
+}
+
+if (isCheckoutAlert) {
+  return "timeout-alert";
+}
+
+        return "";
+      })()
+    }">
       <td>${escapeHtml(row.dateText)}</td>
       <td>${escapeHtml(row.day)}</td>
-      <td>${escapeHtml(row.timeIn)}</td>
-      <td>${escapeHtml(row.timeOut)}</td>
+      <td>
+  ${
+  state.leaveDates.has(row.dateText) || row.client === "Holiday"
+    ? ""
+    : `
+        <input
+          type="text"
+          class="row-timein-input"
+          data-date="${escapeHtml(row.dateText)}"
+          value="${escapeHtml(row.timeIn)}"
+          placeholder="Time In"
+        >
+      `
+  }
+</td>
+
+<td>
+  ${
+  state.leaveDates.has(row.dateText) || row.client === "Holiday"
+    ? ""
+    : `
+        <input
+          type="text"
+          class="row-timeout-input"
+          data-date="${escapeHtml(row.dateText)}"
+          value="${escapeHtml(row.timeOut)}"
+          placeholder="Time Out"
+        >
+      `
+  }
+</td>
       <td>
   ${
     state.leaveDates.has(row.dateText)
@@ -685,9 +921,9 @@ function renderPreview() {
             <td>${escapeHtml(row.creditDays)}</td>
       <td>
   ${
-    state.leaveDates.has(row.dateText)
-      ? ""
-      : `
+  state.leaveDates.has(row.dateText) || row.client === "Holiday"
+    ? ""
+    : `
         <input
           type="text"
           class="row-remarks-input"
@@ -723,6 +959,30 @@ document.querySelectorAll(".row-remarks-input").forEach((input) => {
     } else {
       state.rowRemarksOverrides.set(key, value);
     }
+
+    rebuildReportRows();
+    renderPreview();
+  });
+});
+
+document.querySelectorAll(".row-timein-input").forEach((input) => {
+  input.addEventListener("change", (event) => {
+    const key = event.target.dataset.date;
+    const value = event.target.value.trim();
+
+    state.rowTimeInOverrides.set(key, value);
+
+    rebuildReportRows();
+    renderPreview();
+  });
+});
+
+document.querySelectorAll(".row-timeout-input").forEach((input) => {
+  input.addEventListener("change", (event) => {
+    const key = event.target.dataset.date;
+    const value = event.target.value.trim();
+
+    state.rowTimeOutOverrides.set(key, value);
 
     rebuildReportRows();
     renderPreview();
@@ -892,7 +1152,57 @@ function downloadBlob(blob, name) {
 function openMailDraft() {
   const subject = `MIS Report - ${monthInputToDate(reportMonth.value).toLocaleString("en-US", { month: "long", year: "numeric" })}`;
   const body = `Please find attached attendance.\r\n\r\nAttachment to add: ${state.generatedFileName}`;
-  window.location.href = `mailto:jobs@skagrawal.co.in?cc=somnathsengupta@skagrawal.co.in,nikhil102422@gmail.com&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  const account = normalizeGmailAccount(gmailAccount.value);
+  const isAccountNumber = /^\d+$/.test(account);
+  const accountPath = isAccountNumber
+    ? `/mail/u/${encodeURIComponent(account)}/`
+    : "/mail/";
+  const baseParams = new URLSearchParams();
+  const composeParams = new URLSearchParams({
+    view: "cm",
+    fs: "1",
+    tf: "1",
+    to: "jobs@skagrawal.co.in",
+    cc: "somnathsengupta@skagrawal.co.in,nikhil102422@gmail.com",
+    su: subject,
+    body,
+  });
+
+  if (!isAccountNumber) {
+    baseParams.set("authuser", account);
+    composeParams.set("authuser", account);
+  }
+
+  const warmUrl = `https://mail.google.com${accountPath}${baseParams.toString() ? `?${baseParams.toString()}` : ""}`;
+  const composeUrl = `https://mail.google.com${accountPath}?${composeParams.toString()}`;
+  const draftWindow = window.open("", "_blank");
+
+  if (!draftWindow) {
+    window.location.href = composeUrl;
+    return;
+  }
+
+  draftWindow.document.write(`
+    <!doctype html>
+    <title>Opening Gmail Draft</title>
+    <body style="font-family: system-ui, sans-serif; padding: 24px; color: #17231e;">
+      <strong>Opening Gmail draft...</strong>
+      <p>If it does not open, <a href="${composeUrl}">click here</a>.</p>
+    </body>
+  `);
+  draftWindow.document.close();
+  draftWindow.location.href = warmUrl;
+
+  window.setTimeout(() => {
+    draftWindow.location.href = composeUrl;
+  }, 1200);
+}
+
+function normalizeGmailAccount(value) {
+  return String(value || "5")
+    .trim()
+    .replace(/^https:\/\/mail\.google\.com\/mail\/u\//i, "")
+    .replace(/^u\//i, "") || "5";
 }
 
 function escapeHtml(value) {

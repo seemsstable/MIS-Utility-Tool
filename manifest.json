@@ -3,7 +3,7 @@
   "short_name": "MIS Generator",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#f5f7f3",
-  "theme_color": "#176b55",
+  "background_color": "#f6f8f6",
+  "theme_color": "#1f7a5a",
   "description": "Generate MIS attendance reports from Excel Raw sheets."
 }

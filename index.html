@@ -16,7 +16,10 @@
           <p class="eyebrow">Excel GUI</p>
           <h1>MIS Attendance Generator</h1>
         </div>
-        <span id="statusPill" class="status-pill">Ready</span>
+        <div class="topbar-actions">
+          <button id="themeToggle" type="button">Dark Mode</button>
+          <span id="statusPill" class="status-pill">Ready</span>
+        </div>
       </div>
 
       <div class="panel">
@@ -28,65 +31,67 @@
         </label>
 
         <div class="controls">
-  <label>
-    Article name
-    <input id="articleName" type="text" value="Soumik Biswas">
-  </label>
+          <label>
+            Article name
+            <input id="articleName" type="text" value="Soumik Biswas">
+          </label>
 
-  <label>
-    Reporting senior
-    <input id="reportingSenior" type="text" value="CA Somnath Sengupta">
-  </label>
+          <label>
+            Reporting senior
+            <input id="reportingSenior" type="text" value="CA Somnath Sengupta">
+          </label>
 
-  <label>
-    Month
-    <input id="reportMonth" type="month">
-  </label>
+          <label>
+            Month
+            <input id="reportMonth" type="month">
+          </label>
 
-  <label>
-    Default Client Name
-    <select id="defaultClientName">
-      <option value="Oshea Herbal">Oshea Herbal</option>
-      <option value="Kothari Hosiery">Kothari Hosiery</option>
-      <option value="DS Knit">DS Knit</option>
-      <option value="Royal HO" selected>Royal HO</option>
-      <option value="SK Office">SK Office</option>
-      <option value="mPokket">mPokket</option>
-      <option value="Experis">Experis</option>
-      <option value="RSH Global">RSH Global</option>
-      <option value="Primarc Pecan">Primarc Pecan</option>
-      <option value="Mark Steel">Mark Steel</option>
-      <option value="Hyatt Regency">Hyatt Regency</option>
-      <option value="NutraGro">NutraGro</option>
-    </select>
-  </label>
+          <label>
+            Default Client Name
+            <select id="defaultClientName">
+              <option value="Oshea Herbal">Oshea Herbal</option>
+              <option value="Kothari Hosiery">Kothari Hosiery</option>
+              <option value="DS Knit">DS Knit</option>
+              <option value="Royal HO" selected>Royal HO</option>
+              <option value="SK Office">SK Office</option>
+              <option value="mPokket">mPokket</option>
+              <option value="Experis">Experis</option>
+              <option value="RSH Global">RSH Global</option>
+              <option value="Primarc Pecan">Primarc Pecan</option>
+              <option value="Mark Steel">Mark Steel</option>
+              <option value="Hyatt Regency">Hyatt Regency</option>
+              <option value="NutraGro">NutraGro</option>
+            </select>
+          </label>
 
-  <label>
-  Custom Client Name
-  <input
-    id="customClientName"
-    type="text"
-    placeholder="Enter custom client name"
-  >
-</label>
+          <label>
+            Custom Client Name
+            <input id="customClientName" type="text" placeholder="Enter custom client name">
+          </label>
 
-<label>
-  Laptop Used
-  <select id="defaultDeviceName">
-    <option value="Personal" selected>Personal</option>
-    <option value="SKA Laptop">SKA Laptop</option>
-  </select>
-</label>
+          <label>
+            Laptop Used
+            <select id="defaultDeviceName">
+              <option value="Personal" selected>Personal</option>
+              <option value="SKA Laptop">SKA Laptop</option>
+            </select>
+          </label>
 
-<label style="display:flex; align-items:center; gap:10px;">
-  <input
-    id="removeAllRemarks"
-    type="checkbox"
-    style="width:auto; min-height:auto;"
-  >
-  Remove all auto-generated remarks
-</label>
-</div>
+          <label>
+            Gmail account
+            <input
+              id="gmailAccount"
+              type="text"
+              value="5"
+              placeholder="yourmail@gmail.com or u/5"
+            >
+          </label>
+
+          <label class="inline-check">
+            <input id="removeAllRemarks" type="checkbox">
+            Remove all auto-generated remarks
+          </label>
+        </div>
 
         <div class="actions">
           <button id="generateBtn" type="button" disabled>Generate Excel</button>
