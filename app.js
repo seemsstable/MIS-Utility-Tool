@@ -36,9 +36,10 @@ const addCreditBtn = document.querySelector("#addCreditBtn");
 const creditList = document.querySelector("#creditList");
 
 const defaultClientName = document.querySelector("#defaultClientName");
-const customClientName = document.querySelector("#customClientName");
 const defaultDeviceName = document.querySelector("#defaultDeviceName");
 const gmailAccount = document.querySelector("#gmailAccount");
+const thawkHrUrl = document.querySelector("#thawkHrUrl");
+const openThawkBtn = document.querySelector("#openThawkBtn");
 const removeAllRemarks = document.querySelector("#removeAllRemarks");
 
 const today = new Date();
@@ -58,16 +59,11 @@ reportingSenior.addEventListener("input", saveGlobalSettings);
 
 generateBtn.addEventListener("click", generateReport);
 mailBtn.addEventListener("click", openMailDraft);
+openThawkBtn.addEventListener("click", openThawkHr);
 addLeaveBtn.addEventListener("click", () => addDateOverride("leave", leaveDateInput));
 addCreditBtn.addEventListener("click", () => addDateOverride("credit", creditDateInput));
 
-defaultClientName.addEventListener("change", () => {
-  saveGlobalSettings();
-  rebuildReportRows();
-  renderPreview();
-});
-
-customClientName.addEventListener("input", () => {
+defaultClientName.addEventListener("input", () => {
   saveGlobalSettings();
   rebuildReportRows();
   renderPreview();
@@ -80,6 +76,7 @@ defaultDeviceName.addEventListener("change", () => {
 });
 
 gmailAccount.addEventListener("input", saveGlobalSettings);
+thawkHrUrl.addEventListener("input", saveGlobalSettings);
 
 removeAllRemarks.addEventListener("change", () => {
   saveGlobalSettings();
@@ -141,9 +138,9 @@ function saveGlobalSettings() {
       articleName: articleName.value,
       reportingSenior: reportingSenior.value,
       defaultClientName: defaultClientName.value,
-      customClientName: customClientName.value,
       defaultDeviceName: defaultDeviceName.value,
       gmailAccount: gmailAccount.value,
+      thawkHrUrl: thawkHrUrl.value,
       removeAllRemarks: removeAllRemarks.checked
     })
   );
@@ -163,16 +160,16 @@ function loadSavedSettings() {
       settings.reportingSenior || reportingSenior.value;
 
     defaultClientName.value =
-      settings.defaultClientName || defaultClientName.value;
-
-    customClientName.value =
-      settings.customClientName || "";
+      settings.customClientName || settings.defaultClientName || defaultClientName.value;
 
     defaultDeviceName.value =
       settings.defaultDeviceName || defaultDeviceName.value;
 
     gmailAccount.value =
       settings.gmailAccount || settings.gmailAccountIndex || gmailAccount.value;
+
+    thawkHrUrl.value =
+      settings.thawkHrUrl || "";
 
     removeAllRemarks.checked =
       settings.removeAllRemarks || false;
@@ -375,24 +372,27 @@ function rebuildReportRows() {
 
 function applyDateOverrides(row) {
   const key = row.dateText;
+  const isLeaveDay = state.leaveDates.has(key);
+  const isCreditDay = state.creditDates.has(key);
 
-  const creditDays = state.creditDates.has(key)
+  const creditDays = isCreditDay
     ? "1"
     : row.creditDays;
 
-  const customClient = customClientName.value.trim();
-
-const globalClient =
-  customClient !== ""
-    ? customClient
-    : (defaultClientName.value || "Royal HO");
-
+  const globalClient = defaultClientName.value.trim() || "Royal HO";
   const rowClientOverride = state.rowClientOverrides.get(key);
   const rowRemarksOverride = state.rowRemarksOverrides.get(key);
   const rowTimeInOverride = state.rowTimeInOverrides.get(key);
   const rowTimeOutOverride = state.rowTimeOutOverrides.get(key);
+  const specialRemark = isLeaveDay && isCreditDay
+    ? "LEAVE / CREDIT"
+    : isLeaveDay
+      ? "LEAVE"
+      : isCreditDay
+        ? "CREDIT"
+        : "";
 
-  if (state.leaveDates.has(key)) {
+  if (isLeaveDay) {
     return {
       ...row,
       timeIn: "",
@@ -401,7 +401,8 @@ const globalClient =
       device: "",
       work: "",
       creditDays,
-      remarks: "",
+      remarks: specialRemark,
+      rowStatus: "leave",
     };
   }
 
@@ -433,6 +434,8 @@ const globalClient =
       : (defaultDeviceName.value || "Personal"),
 
   remarks: (() => {
+  if (isCreditDay) return specialRemark;
+
   if (removeAllRemarks.checked) return "";
 
   if (rowRemarksOverride !== undefined) {
@@ -484,6 +487,7 @@ const globalClient =
 })(),
 
   creditDays,
+  rowStatus: isCreditDay ? "credit" : "",
 };
 }
 
@@ -537,13 +541,7 @@ function renderDateList(type) {
 }
 
 function getDefaultClientName() {
-  const custom = customClientName.value.trim();
-
-  if (custom !== "") {
-    return custom;
-  }
-
-  return defaultClientName.value || "Royal HO";
+  return defaultClientName.value.trim() || "Royal HO";
 }
 
 function buildReportRow(date, timeIn, timeOut) {
@@ -750,6 +748,21 @@ function styleReport(sheet, lastRow) {
     sheet.getRow(rowNumber).getCell(5).font = { bold: false };
   }
 
+  state.reportRows.forEach((reportRow, index) => {
+    if (!reportRow.rowStatus) return;
+
+    const row = sheet.getRow(8 + index);
+    for (let colNumber = 2; colNumber <= 10; colNumber += 1) {
+      row.getCell(colNumber).fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE7EBE8" },
+      };
+    }
+
+    row.getCell(10).font = { bold: true };
+  });
+
   for (let colNumber = 2; colNumber <= 10; colNumber += 1) {
     const headerCell = sheet.getRow(7).getCell(colNumber);
     headerCell.font = { bold: true };
@@ -808,6 +821,14 @@ function renderPreview() {
   previewBody.innerHTML = rows.map((row) => `
     <tr class="${
       (() => {
+        if (row.rowStatus === "leave") {
+          return "special-day leave-day";
+        }
+
+        if (row.rowStatus === "credit") {
+          return "special-day credit-day";
+        }
+
         const timeInParsed = parseExcelTime(row.timeIn);
         const timeOutParsed = parseExcelTime(row.timeOut);
         const timeOutMins = timeOutParsed
@@ -837,9 +858,9 @@ if (isCheckoutAlert) {
         return "";
       })()
     }">
-      <td>${escapeHtml(row.dateText)}</td>
-      <td>${escapeHtml(row.day)}</td>
-      <td>
+      <td data-label="Date">${escapeHtml(row.dateText)}</td>
+      <td data-label="Day">${escapeHtml(row.day)}</td>
+      <td data-label="Time In">
   ${
   state.leaveDates.has(row.dateText) || row.client === "Holiday"
     ? ""
@@ -855,7 +876,7 @@ if (isCheckoutAlert) {
   }
 </td>
 
-<td>
+<td data-label="Time Out">
   ${
   state.leaveDates.has(row.dateText) || row.client === "Holiday"
     ? ""
@@ -870,58 +891,29 @@ if (isCheckoutAlert) {
       `
   }
 </td>
-      <td>
+      <td data-label="Client">
   ${
     state.leaveDates.has(row.dateText)
       ? ""
       : `
-        <select
-          class="row-client-select"
+        <input
+          type="text"
+          class="row-client-input"
           data-date="${escapeHtml(row.dateText)}"
+          value="${escapeHtml(row.client)}"
+          placeholder="Client name"
         >
-          <option value="Oshea Herbal" ${row.client === "Oshea Herbal" ? "selected" : ""}>Oshea Herbal</option>
-          <option value="Kothari Hosiery" ${row.client === "Kothari Hosiery" ? "selected" : ""}>Kothari Hosiery</option>
-          <option value="DS Knit" ${row.client === "DS Knit" ? "selected" : ""}>DS Knit</option>
-          <option value="Royal HO" ${row.client === "Royal HO" ? "selected" : ""}>Royal HO</option>
-          <option value="SK Office" ${row.client === "SK Office" ? "selected" : ""}>SK Office</option>
-          <option value="mPokket" ${row.client === "mPokket" ? "selected" : ""}>mPokket</option>
-          <option value="Experis" ${row.client === "Experis" ? "selected" : ""}>Experis</option>
-          <option value="RSH Global" ${row.client === "RSH Global" ? "selected" : ""}>RSH Global</option>
-          <option value="Primarc Pecan" ${row.client === "Primarc Pecan" ? "selected" : ""}>Primarc Pecan</option>
-          <option value="Mark Steel" ${row.client === "Mark Steel" ? "selected" : ""}>Mark Steel</option>
-          <option value="Hyatt Regency" ${row.client === "Hyatt Regency" ? "selected" : ""}>Hyatt Regency</option>
-          <option value="NutraGro" ${row.client === "NutraGro" ? "selected" : ""}>NutraGro</option>
-
-          ${(
-            row.client &&
-            ![
-              "Oshea Herbal",
-              "Kothari Hosiery",
-              "DS Knit",
-              "Royal HO",
-              "SK Office",
-              "mPokket",
-              "Experis",
-              "RSH Global",
-              "Primarc Pecan",
-              "Mark Steel",
-              "Hyatt Regency",
-              "NutraGro"
-            ].includes(row.client)
-          )
-            ? `<option value="${escapeHtml(row.client)}" selected>${escapeHtml(row.client)}</option>`
-            : ""
-          }
-        </select>
       `
   }
 </td>
-      <td>${escapeHtml(row.device)}</td>
-      <td>${escapeHtml(row.work)}</td>
-            <td>${escapeHtml(row.creditDays)}</td>
-      <td>
+      <td data-label="Device">${escapeHtml(row.device)}</td>
+      <td data-label="Work">${escapeHtml(row.work)}</td>
+            <td data-label="Credit Days">${escapeHtml(row.creditDays)}</td>
+      <td data-label="Remarks">
   ${
-  state.leaveDates.has(row.dateText) || row.client === "Holiday"
+  row.rowStatus
+    ? `<strong class="special-remark">${escapeHtml(row.remarks)}</strong>`
+    : state.leaveDates.has(row.dateText) || row.client === "Holiday"
     ? ""
     : `
         <input
@@ -937,10 +929,10 @@ if (isCheckoutAlert) {
     </tr>
   `).join("");
 
-  document.querySelectorAll(".row-client-select").forEach((select) => {
-  select.addEventListener("change", (event) => {
+  document.querySelectorAll(".row-client-input").forEach((input) => {
+  input.addEventListener("change", (event) => {
     const key = event.target.dataset.date;
-    const value = event.target.value;
+    const value = event.target.value.trim();
 
     state.rowClientOverrides.set(key, value);
 
@@ -1203,6 +1195,27 @@ function normalizeGmailAccount(value) {
     .trim()
     .replace(/^https:\/\/mail\.google\.com\/mail\/u\//i, "")
     .replace(/^u\//i, "") || "5";
+}
+
+function openThawkHr() {
+  const url = normalizeUrl(thawkHrUrl.value);
+
+  if (!url) {
+    alert("Enter your Thawk HR URL first.");
+    thawkHrUrl.focus();
+    return;
+  }
+
+  window.open(url, "_blank", "noopener");
+}
+
+function normalizeUrl(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+
+  return /^https?:\/\//i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
 }
 
 function escapeHtml(value) {

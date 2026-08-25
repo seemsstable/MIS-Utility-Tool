@@ -48,25 +48,7 @@
 
           <label>
             Default Client Name
-            <select id="defaultClientName">
-              <option value="Oshea Herbal">Oshea Herbal</option>
-              <option value="Kothari Hosiery">Kothari Hosiery</option>
-              <option value="DS Knit">DS Knit</option>
-              <option value="Royal HO" selected>Royal HO</option>
-              <option value="SK Office">SK Office</option>
-              <option value="mPokket">mPokket</option>
-              <option value="Experis">Experis</option>
-              <option value="RSH Global">RSH Global</option>
-              <option value="Primarc Pecan">Primarc Pecan</option>
-              <option value="Mark Steel">Mark Steel</option>
-              <option value="Hyatt Regency">Hyatt Regency</option>
-              <option value="NutraGro">NutraGro</option>
-            </select>
-          </label>
-
-          <label>
-            Custom Client Name
-            <input id="customClientName" type="text" placeholder="Enter custom client name">
+            <input id="defaultClientName" type="text" value="Royal HO" placeholder="Default client for normal days">
           </label>
 
           <label>
@@ -87,6 +69,15 @@
             >
           </label>
 
+          <label>
+            Thawk HR URL
+            <input
+              id="thawkHrUrl"
+              type="url"
+              placeholder="https://your-thawk-hr-site"
+            >
+          </label>
+
           <label class="inline-check">
             <input id="removeAllRemarks" type="checkbox">
             Remove all auto-generated remarks
@@ -95,6 +86,7 @@
 
         <div class="actions">
           <button id="generateBtn" type="button" disabled>Generate Excel</button>
+          <button id="openThawkBtn" type="button">Open Thawk HR</button>
           <button id="mailBtn" type="button" disabled>Open Email Draft</button>
         </div>
       </div>

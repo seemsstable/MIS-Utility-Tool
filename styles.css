@@ -24,6 +24,9 @@
   --alert-both-bg: #5a1f29;
   --alert-both-line: #ff6b78;
   --alert-both-ink: #fff0f1;
+  --special-row-bg: #242826;
+  --special-row-line: #8f9892;
+  --special-row-ink: #eef4f1;
 }
 
 :root[data-theme="light"] {
@@ -52,6 +55,9 @@
   --alert-both-bg: #f8c9cf;
   --alert-both-line: #a81f2f;
   --alert-both-ink: #55121b;
+  --special-row-bg: #eef1ef;
+  --special-row-line: #98a29c;
+  --special-row-ink: #26302b;
 }
 
 * {
@@ -313,6 +319,7 @@ h2 {
 input[type="text"],
 input[type="month"],
 input[type="date"],
+input[type="url"],
 select {
   width: 100%;
   min-height: 44px;
@@ -584,8 +591,14 @@ tbody tr:hover {
 
 tr.timein-alert,
 tr.timeout-alert,
-tr.both-alert {
+tr.both-alert,
+tr.special-day {
   box-shadow: inset 4px 0 0 var(--alert-line);
+}
+
+tr.special-day {
+  --alert-line: var(--special-row-line);
+  background: var(--special-row-bg) !important;
 }
 
 tr.timein-alert {
@@ -618,9 +631,14 @@ tr.both-alert td {
   color: var(--alert-both-ink) !important;
 }
 
+tr.special-day td {
+  color: var(--special-row-ink) !important;
+}
+
 tr.timein-alert td,
 tr.timeout-alert td,
-tr.both-alert td {
+tr.both-alert td,
+tr.special-day td {
   background: transparent !important;
   font-weight: 600;
 }
@@ -628,18 +646,29 @@ tr.both-alert td {
 tr.timein-alert input,
 tr.timeout-alert input,
 tr.both-alert input,
+tr.special-day input,
 tr.timein-alert select,
 tr.timeout-alert select,
-tr.both-alert select {
+tr.both-alert select,
+tr.special-day select {
   background: color-mix(in srgb, var(--field) 88%, white 12%) !important;
   color: var(--ink) !important;
   border-color: color-mix(in srgb, var(--alert-line) 45%, var(--line)) !important;
   font-weight: 650;
 }
 
+.special-remark {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  color: var(--special-row-ink);
+  font-weight: 900;
+  letter-spacing: .02em;
+}
+
 @media (max-width: 760px) {
   .app-shell {
-    padding: 14px;
+    padding: 12px;
   }
 
   .topbar,
@@ -651,6 +680,10 @@ tr.both-alert select {
   .topbar-actions {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .panel {
+    padding: 14px;
   }
 
   .panel,
@@ -670,11 +703,100 @@ tr.both-alert select {
     align-items: stretch;
   }
 
+  button,
+  input[type="text"],
+  input[type="month"],
+  input[type="date"],
+  input[type="url"],
+  select {
+    min-height: 48px;
+  }
+
   .date-entry {
     grid-template-columns: 1fr;
   }
 
   h1 {
     font-size: 30px;
+  }
+
+  .table-scroll {
+    overflow: visible;
+  }
+
+  table,
+  tbody,
+  tr,
+  td {
+    display: block;
+    width: 100%;
+  }
+
+  table {
+    min-width: 0;
+    border-collapse: separate;
+  }
+
+  thead {
+    display: none;
+  }
+
+  tbody {
+    display: grid;
+    gap: 12px;
+    padding: 12px;
+  }
+
+  tbody tr {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel-strong);
+    overflow: hidden;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.08);
+  }
+
+  tbody tr:hover {
+    transform: translateY(-1px);
+  }
+
+  td {
+    display: grid;
+    grid-template-columns: 104px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  td:last-child {
+    border-bottom: 0;
+  }
+
+  td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  td.empty {
+    display: block;
+    text-align: center;
+  }
+
+  td.empty::before {
+    content: "";
+  }
+
+  tr.timein-alert,
+  tr.timeout-alert,
+  tr.both-alert,
+  tr.special-day {
+    box-shadow: inset 5px 0 0 var(--alert-line), 0 10px 26px rgba(0, 0, 0, 0.08);
+  }
+
+  tr.both-alert {
+    box-shadow: inset 8px 0 0 var(--alert-both-line), 0 10px 26px rgba(0, 0, 0, 0.08);
   }
 }
