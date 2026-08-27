@@ -7,6 +7,7 @@
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#176b55">
   <link rel="stylesheet" href="styles.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
   <main class="app-shell">
@@ -69,13 +70,21 @@
             >
           </label>
 
-          <label>
-            Thawk HR URL
+          <label class="wide-field">
+            Gmail API Client ID <small>(optional — enables true auto-attach, see below)</small>
             <input
-              id="thawkHrUrl"
-              type="url"
-              placeholder="https://your-thawk-hr-site"
+              id="googleClientId"
+              type="text"
+              placeholder="xxxxxxxxxx.apps.googleusercontent.com"
             >
+          </label>
+
+          <label>
+            Location Source
+            <select id="locationSource">
+              <option value="checkin" selected>Check-In Location</option>
+              <option value="checkout">Check-Out Location</option>
+            </select>
           </label>
 
           <label class="inline-check">
@@ -89,6 +98,10 @@
           <button id="openThawkBtn" type="button">Open Thawk HR</button>
           <button id="mailBtn" type="button" disabled>Open Email Draft</button>
         </div>
+
+        <p class="gmail-api-hint">
+          Leave <strong>Gmail API Client ID</strong> blank to keep the current behaviour (download once, then attach manually in the Gmail compose window that opens). Fill it in once this tool is hosted on a real web address (e.g. GitHub Pages) to have <strong>Open Email Draft</strong> create the Gmail draft with the file already attached — works the same on any browser or device.
+        </p>
       </div>
 
       <div class="date-tools">
@@ -116,6 +129,19 @@
           <div id="creditList" class="date-list"></div>
         </section>
       </div>
+
+      <section class="mapping-panel">
+        <div class="mapping-head">
+          <div>
+            <h2>Saved Location Mappings</h2>
+            <p>GPS coordinates learned from T-Hawk files for automatic client detection.</p>
+          </div>
+          <span id="mappingCount" class="status-pill">0 saved</span>
+        </div>
+        <div id="mappingList" class="mapping-list">
+          <div class="mapping-empty">No saved locations yet.</div>
+        </div>
+      </section>
 
       <div class="summary-grid">
         <div>
@@ -160,6 +186,27 @@
       </section>
     </section>
   </main>
+
+  <div id="learnConfirmOverlay" class="modal-overlay" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="learnConfirmTitle">
+      <div class="modal-head">
+        <h2 id="learnConfirmTitle">Remember these locations?</h2>
+        <p>Generating will save each day's T-Hawk location against its Client, so the tool can auto-detect it next time. Uncheck any day you don't want remembered.</p>
+      </div>
+      <div class="modal-toolbar">
+        <span id="learnConfirmCount" class="status-pill">0 days selected</span>
+        <div class="modal-toolbar-actions">
+          <button id="learnConfirmSelectAll" type="button" class="link-btn">Select all</button>
+          <button id="learnConfirmSelectNone" type="button" class="link-btn">Select none</button>
+        </div>
+      </div>
+      <div id="learnConfirmList" class="modal-list"></div>
+      <div class="modal-actions">
+        <button id="learnConfirmCancel" type="button" class="secondary-btn">Cancel</button>
+        <button id="learnConfirmProceed" type="button">Generate &amp; Save Selected</button>
+      </div>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
   <script src="app.js"></script>

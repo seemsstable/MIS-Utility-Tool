@@ -13,7 +13,12 @@ const state = {
   rowRemarksOverrides: new Map(),
   rowTimeInOverrides: new Map(),
   rowTimeOutOverrides: new Map(),
+  locationMappings: [],
+  pendingLearnKeys: new Set(),
 };
+
+const LOCATION_MATCH_RADIUS_METERS = 800;
+const LOCATION_MAPPINGS_STORAGE_KEY = "mis_location_mappings";
 
 const workbookInput = document.querySelector("#workbookInput");
 const generateBtn = document.querySelector("#generateBtn");
@@ -38,9 +43,20 @@ const creditList = document.querySelector("#creditList");
 const defaultClientName = document.querySelector("#defaultClientName");
 const defaultDeviceName = document.querySelector("#defaultDeviceName");
 const gmailAccount = document.querySelector("#gmailAccount");
-const thawkHrUrl = document.querySelector("#thawkHrUrl");
+const googleClientIdInput = document.querySelector("#googleClientId");
 const openThawkBtn = document.querySelector("#openThawkBtn");
+const locationSource = document.querySelector("#locationSource");
+const mappingCount = document.querySelector("#mappingCount");
+const mappingList = document.querySelector("#mappingList");
 const removeAllRemarks = document.querySelector("#removeAllRemarks");
+
+const learnConfirmOverlay = document.querySelector("#learnConfirmOverlay");
+const learnConfirmList = document.querySelector("#learnConfirmList");
+const learnConfirmCount = document.querySelector("#learnConfirmCount");
+const learnConfirmSelectAll = document.querySelector("#learnConfirmSelectAll");
+const learnConfirmSelectNone = document.querySelector("#learnConfirmSelectNone");
+const learnConfirmCancel = document.querySelector("#learnConfirmCancel");
+const learnConfirmProceed = document.querySelector("#learnConfirmProceed");
 
 const today = new Date();
 
@@ -57,11 +73,50 @@ workbookInput.addEventListener("change", async (event) => {
 articleName.addEventListener("input", saveGlobalSettings);
 reportingSenior.addEventListener("input", saveGlobalSettings);
 
-generateBtn.addEventListener("click", generateReport);
+generateBtn.addEventListener("click", openLearnConfirmModal);
 mailBtn.addEventListener("click", openMailDraft);
 openThawkBtn.addEventListener("click", openThawkHr);
 addLeaveBtn.addEventListener("click", () => addDateOverride("leave", leaveDateInput));
 addCreditBtn.addEventListener("click", () => addDateOverride("credit", creditDateInput));
+
+learnConfirmCancel.addEventListener("click", closeLearnConfirmModal);
+learnConfirmProceed.addEventListener("click", confirmLearnAndGenerate);
+learnConfirmSelectAll.addEventListener("click", () => setAllLearnCheckboxes(true));
+learnConfirmSelectNone.addEventListener("click", () => setAllLearnCheckboxes(false));
+learnConfirmOverlay.addEventListener("click", (event) => {
+  if (event.target === learnConfirmOverlay) closeLearnConfirmModal();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !learnConfirmOverlay.hidden) closeLearnConfirmModal();
+});
+
+// Delegated listener, bound once to the persistent <tbody> element. When a
+// single row's field is committed we only re-render that one <tr> (see
+// updateSingleRow) instead of rebuilding the whole table, so clicking
+// straight from one row's field into another row's field never gets its
+// target element yanked out from under it mid-click.
+previewBody.addEventListener("change", (event) => {
+  const target = event.target;
+  const key = target?.dataset?.date;
+  if (!key) return;
+
+  if (target.classList.contains("row-client-input")) {
+    state.rowClientOverrides.set(key, target.value.trim());
+  } else if (target.classList.contains("row-remarks-input")) {
+    const value = target.value.trim();
+    state.rowRemarksOverrides.set(key, value);
+  } else if (target.classList.contains("row-timein-input")) {
+    state.rowTimeInOverrides.set(key, target.value.trim());
+  } else if (target.classList.contains("row-timeout-input")) {
+    state.rowTimeOutOverrides.set(key, target.value.trim());
+  } else {
+    return;
+  }
+
+  rebuildReportRows();
+  updateSingleRow(key);
+  updateSummaryCounts();
+});
 
 defaultClientName.addEventListener("input", () => {
   saveGlobalSettings();
@@ -76,7 +131,12 @@ defaultDeviceName.addEventListener("change", () => {
 });
 
 gmailAccount.addEventListener("input", saveGlobalSettings);
-thawkHrUrl.addEventListener("input", saveGlobalSettings);
+googleClientIdInput.addEventListener("input", saveGlobalSettings);
+locationSource.addEventListener("change", () => {
+  saveGlobalSettings();
+  rebuildReportRows();
+  renderPreview();
+});
 
 removeAllRemarks.addEventListener("change", () => {
   saveGlobalSettings();
@@ -84,8 +144,10 @@ removeAllRemarks.addEventListener("change", () => {
   renderPreview();
 });
 
+loadLocationMappings();
 loadSavedSettings();
 loadTheme();
+renderLocationMappings();
 
 themeToggle.addEventListener("click", (event) => toggleTheme(event));
 
@@ -140,7 +202,8 @@ function saveGlobalSettings() {
       defaultClientName: defaultClientName.value,
       defaultDeviceName: defaultDeviceName.value,
       gmailAccount: gmailAccount.value,
-      thawkHrUrl: thawkHrUrl.value,
+      googleClientId: googleClientIdInput.value,
+      locationSource: locationSource.value,
       removeAllRemarks: removeAllRemarks.checked
     })
   );
@@ -168,8 +231,11 @@ function loadSavedSettings() {
     gmailAccount.value =
       settings.gmailAccount || settings.gmailAccountIndex || gmailAccount.value;
 
-    thawkHrUrl.value =
-      settings.thawkHrUrl || "";
+    googleClientIdInput.value =
+      settings.googleClientId || "";
+
+    locationSource.value =
+      settings.locationSource || locationSource.value;
 
     removeAllRemarks.checked =
       settings.removeAllRemarks || false;
@@ -227,6 +293,8 @@ function buildReportRows(workbook) {
       date,
       timeIn: parseExcelTime(row.getCell(layout.timeInCol).value),
       timeOut: parseExcelTime(row.getCell(layout.timeOutCol).value),
+      checkInLocation: readLocation(row, layout.checkInLocationCol, layout.checkInAddressCol),
+      checkOutLocation: readLocation(row, layout.checkOutLocationCol, layout.checkOutAddressCol),
     });
   }
 
@@ -261,7 +329,11 @@ function findAttendanceWorksheet(workbook) {
           startRow: rowNumber + 1,
           dateCol: 2,
           timeInCol: 3,
+          checkInLocationCol: 4,
+          checkInAddressCol: 5,
           timeOutCol: 7,
+          checkOutLocationCol: 8,
+          checkOutAddressCol: 9,
           fillMissingDates: true,
         };
       }
@@ -293,13 +365,22 @@ function buildRowsFromRecords(records, fillMissingDates) {
       byDate.set(key, {
         date: record.date,
         timeIn: record.timeIn,
-        timeOut: record.timeOut
+        timeOut: record.timeOut,
+        checkInLocation: record.checkInLocation,
+        checkOutLocation: record.checkOutLocation,
       });
       continue;
     }
 
-    existing.timeIn = earliestTime(existing.timeIn, record.timeIn);
-    existing.timeOut = latestTime(existing.timeOut, record.timeOut);
+    if (!existing.timeIn || (record.timeIn && timeToMinutes(record.timeIn) < timeToMinutes(existing.timeIn))) {
+      existing.timeIn = record.timeIn;
+      existing.checkInLocation = record.checkInLocation || existing.checkInLocation;
+    }
+
+    if (!existing.timeOut || (record.timeOut && timeToMinutes(record.timeOut) > timeToMinutes(existing.timeOut))) {
+      existing.timeOut = record.timeOut;
+      existing.checkOutLocation = record.checkOutLocation || existing.checkOutLocation;
+    }
   }
 
   if (byDate.size) {
@@ -349,7 +430,9 @@ function buildRowsFromRecords(records, fillMissingDates) {
         byDate.set(key, {
           date: current,
           timeIn: null,
-          timeOut: null
+          timeOut: null,
+          checkInLocation: null,
+          checkOutLocation: null,
         });
       }
     }
@@ -361,7 +444,11 @@ function buildRowsFromRecords(records, fillMissingDates) {
       buildReportRow(
         record.date,
         record.timeIn,
-        record.timeOut
+        record.timeOut,
+        {
+          checkInLocation: record.checkInLocation,
+          checkOutLocation: record.checkOutLocation,
+        }
       )
     );
 }
@@ -384,6 +471,11 @@ function applyDateOverrides(row) {
   const rowRemarksOverride = state.rowRemarksOverrides.get(key);
   const rowTimeInOverride = state.rowTimeInOverrides.get(key);
   const rowTimeOutOverride = state.rowTimeOutOverrides.get(key);
+  const locationDetection = getLocationDetection(row);
+  const detectedClient =
+    locationDetection && locationDetection.status === "matched"
+      ? locationDetection.client
+      : "";
   const specialRemark = isLeaveDay && isCreditDay
     ? "LEAVE / CREDIT"
     : isLeaveDay
@@ -403,6 +495,7 @@ function applyDateOverrides(row) {
       creditDays,
       remarks: specialRemark,
       rowStatus: "leave",
+      locationDetection: null,
     };
   }
 
@@ -425,7 +518,7 @@ function applyDateOverrides(row) {
     : (
         row.client === "Holiday"
           ? "Holiday"
-          : (globalClient || "Royal HO")
+          : (detectedClient || globalClient || "Royal HO")
       ),
 
   device:
@@ -488,6 +581,7 @@ function applyDateOverrides(row) {
 
   creditDays,
   rowStatus: isCreditDay ? "credit" : "",
+  locationDetection,
 };
 }
 
@@ -544,7 +638,7 @@ function getDefaultClientName() {
   return defaultClientName.value.trim() || "Royal HO";
 }
 
-function buildReportRow(date, timeIn, timeOut) {
+function buildReportRow(date, timeIn, timeOut, locationData = {}) {
   let client = "";
   let device = "";
   let work = "";
@@ -607,10 +701,387 @@ function buildReportRow(date, timeIn, timeOut) {
     work,
     creditDays: "",
     remarks: remarks.join(", "),
+    locations: {
+      checkin: locationData.checkInLocation || null,
+      checkout: locationData.checkOutLocation || null,
+    },
+    locationDetection: null,
+    rowStatus: "",
   };
 }
 
-async function generateReport() {
+function readLocation(row, coordinateCol, addressCol) {
+  if (!coordinateCol) return null;
+
+  const coordinateText = row.getCell(coordinateCol).value;
+  const coordinate = parseCoordinate(coordinateText);
+  if (!coordinate) return null;
+
+  return {
+    ...coordinate,
+    raw: String(coordinateText ?? "").trim(),
+    address: addressCol ? String(row.getCell(addressCol).value ?? "").trim() : "",
+  };
+}
+
+function parseCoordinate(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+
+  const match = text.match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+  if (!match) return null;
+
+  const lat = Number(match[1]);
+  const lng = Number(match[2]);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+
+  return { lat, lng };
+}
+
+function getLocationDetection(row) {
+  const location = row.locations?.[locationSource.value || "checkin"];
+  if (!location) return null;
+
+  const candidates = [];
+
+  state.locationMappings.forEach((mapping) => {
+    mapping.coordinates.forEach((coordinate) => {
+      const distance = distanceMeters(location, coordinate);
+      if (distance <= LOCATION_MATCH_RADIUS_METERS) {
+        candidates.push({
+          mappingId: mapping.id,
+          client: mapping.client,
+          distance,
+        });
+      }
+    });
+  });
+
+  if (!candidates.length) {
+    return {
+      status: "unknown",
+      location,
+      candidates: [],
+    };
+  }
+
+  const closestByClient = new Map();
+  candidates.forEach((candidate) => {
+    const current = closestByClient.get(candidate.client);
+    if (!current || candidate.distance < current.distance) {
+      closestByClient.set(candidate.client, candidate);
+    }
+  });
+
+  const clientCandidates = Array.from(closestByClient.values())
+    .sort((a, b) => a.distance - b.distance);
+
+  if (clientCandidates.length > 1) {
+    return {
+      status: "ambiguous",
+      location,
+      candidates: clientCandidates,
+    };
+  }
+
+  return {
+    status: "matched",
+    location,
+    client: clientCandidates[0].client,
+    distance: clientCandidates[0].distance,
+    candidates: clientCandidates,
+  };
+}
+
+function distanceMeters(first, second) {
+  const earthRadius = 6371000;
+  const lat1 = toRadians(first.lat);
+  const lat2 = toRadians(second.lat);
+  const deltaLat = toRadians(second.lat - first.lat);
+  const deltaLng = toRadians(second.lng - first.lng);
+  const a =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) ** 2;
+
+  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function toRadians(value) {
+  return value * Math.PI / 180;
+}
+
+function createMappingId() {
+  if (window.crypto && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+
+  return `mapping-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function loadLocationMappings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LOCATION_MAPPINGS_STORAGE_KEY) || "[]");
+    state.locationMappings = Array.isArray(saved)
+      ? saved
+          .map((mapping) => ({
+            id: mapping.id || createMappingId(),
+            client: String(mapping.client || "").trim(),
+            address: String(mapping.address || "").trim(),
+            coordinates: Array.isArray(mapping.coordinates)
+              ? mapping.coordinates.filter((coordinate) =>
+                  Number.isFinite(coordinate.lat) && Number.isFinite(coordinate.lng)
+                )
+              : [],
+          }))
+          .filter((mapping) => mapping.client && mapping.coordinates.length)
+      : [];
+  } catch (error) {
+    console.error("Location mappings load failed", error);
+    state.locationMappings = [];
+  }
+}
+
+function saveLocationMappings() {
+  localStorage.setItem(
+    LOCATION_MAPPINGS_STORAGE_KEY,
+    JSON.stringify(state.locationMappings)
+  );
+}
+
+// Silently teaches the location database: GPS -> Client.
+// Called automatically whenever the user edits a row's Client field, never
+// from a dedicated button. Adds an additional observed coordinate for the
+// client the user actually typed/kept — it never rewrites or removes any
+// other client's existing learned coordinates.
+function learnLocation(client, location) {
+  const trimmedClient = String(client || "").trim();
+  if (!trimmedClient || trimmedClient === "Holiday" || !location) return;
+
+  const existing = state.locationMappings.find(
+    (mapping) => mapping.client.toLowerCase() === trimmedClient.toLowerCase()
+  );
+
+  if (existing) {
+    const alreadySaved = existing.coordinates.some(
+      (coordinate) => distanceMeters(location, coordinate) < 8
+    );
+
+    if (!alreadySaved) {
+      existing.coordinates.push({ lat: location.lat, lng: location.lng });
+    }
+
+    if (!existing.address && location.address) {
+      existing.address = location.address;
+    }
+  } else {
+    state.locationMappings.push({
+      id: createMappingId(),
+      client: trimmedClient,
+      address: location.address || "",
+      coordinates: [{ lat: location.lat, lng: location.lng }],
+    });
+  }
+
+  saveLocationMappings();
+  renderLocationMappings();
+}
+
+// Looks up the raw (undetected) T-Hawk coordinate for a given report date
+// and learns it against whatever client is showing for that row.
+function learnLocationForRow(key, client) {
+  const trimmedClient = String(client || "").trim();
+  if (!trimmedClient || trimmedClient === "Holiday") return;
+
+  const baseRow = state.baseReportRows.find((reportRow) => reportRow.dateText === key);
+  const location = baseRow?.locations?.[locationSource.value || "checkin"];
+  if (!location) return;
+
+  learnLocation(trimmedClient, location);
+}
+
+// Returns the rows that are eligible to teach the location database: not a
+// Leave day, has a usable Client, and has a raw T-Hawk coordinate for the
+// currently selected Location Source.
+function getLearnableRows() {
+  return state.reportRows.filter((row) => {
+    if (row.rowStatus === "leave") return false;
+
+    const client = String(row.client || "").trim();
+    if (!client || client === "Holiday") return false;
+
+    const baseRow = state.baseReportRows.find((base) => base.dateText === row.dateText);
+    const location = baseRow?.locations?.[locationSource.value || "checkin"];
+    return Boolean(location);
+  });
+}
+
+function openLearnConfirmModal() {
+  if (!state.reportRows.length) return;
+
+  const learnableRows = getLearnableRows();
+  state.pendingLearnKeys = new Set(learnableRows.map((row) => row.dateText));
+
+  renderLearnConfirmList(learnableRows);
+  updateLearnConfirmCount();
+  learnConfirmOverlay.hidden = false;
+}
+
+function closeLearnConfirmModal() {
+  learnConfirmOverlay.hidden = true;
+}
+
+function renderLearnConfirmList(rows) {
+  if (!rows.length) {
+    learnConfirmList.innerHTML = '<div class="modal-list-empty">No T-Hawk locations to remember in this batch — the Excel will still generate.</div>';
+    return;
+  }
+
+  learnConfirmList.innerHTML = rows.map((row) => {
+    const detection = row.locationDetection;
+    const noteText = detection?.status === "matched"
+      ? `Confirms the saved ${detection.client} location`
+      : "New / unrecognised location for this client";
+
+    return `
+      <label class="modal-row">
+        <input type="checkbox" class="learn-row-check" data-date="${escapeHtml(row.dateText)}" checked>
+        <span class="modal-row-text">
+          <strong>${escapeHtml(row.dateText)} (${escapeHtml(row.day)}) — ${escapeHtml(row.client)}</strong>
+          <span>${escapeHtml(noteText)}</span>
+        </span>
+      </label>
+    `;
+  }).join("");
+
+  learnConfirmList.querySelectorAll(".learn-row-check").forEach((checkbox) => {
+    checkbox.addEventListener("change", (event) => {
+      const key = event.target.dataset.date;
+      if (event.target.checked) {
+        state.pendingLearnKeys.add(key);
+      } else {
+        state.pendingLearnKeys.delete(key);
+      }
+      updateLearnConfirmCount();
+    });
+  });
+}
+
+function setAllLearnCheckboxes(checked) {
+  learnConfirmList.querySelectorAll(".learn-row-check").forEach((checkbox) => {
+    checkbox.checked = checked;
+    const key = checkbox.dataset.date;
+    if (checked) {
+      state.pendingLearnKeys.add(key);
+    } else {
+      state.pendingLearnKeys.delete(key);
+    }
+  });
+  updateLearnConfirmCount();
+}
+
+function updateLearnConfirmCount() {
+  const count = state.pendingLearnKeys.size;
+  learnConfirmCount.textContent = `${count} day${count === 1 ? "" : "s"} selected`;
+  learnConfirmProceed.textContent = count
+    ? `Generate & Save ${count} Selected`
+    : "Generate Without Saving";
+}
+
+async function confirmLearnAndGenerate() {
+  const keysToLearn = state.pendingLearnKeys;
+
+  state.reportRows.forEach((row) => {
+    if (keysToLearn.has(row.dateText)) {
+      learnLocationForRow(row.dateText, row.client);
+    }
+  });
+
+  closeLearnConfirmModal();
+  await performGeneration();
+}
+
+function removeLocationMapping(id) {
+  state.locationMappings = state.locationMappings.filter((mapping) => mapping.id !== id);
+  saveLocationMappings();
+  renderLocationMappings();
+  rebuildReportRows();
+  renderPreview();
+}
+
+function renderLocationMappings() {
+  mappingCount.textContent = `${state.locationMappings.length} saved`;
+
+  if (!state.locationMappings.length) {
+    mappingList.innerHTML = '<div class="mapping-empty">No saved locations yet.</div>';
+    return;
+  }
+
+  mappingList.innerHTML = state.locationMappings.map((mapping) => {
+    const first = mapping.coordinates[0];
+    const coordinateText = mapping.coordinates
+      .map((coordinate) => `${coordinate.lat.toFixed(6)}, ${coordinate.lng.toFixed(6)}`)
+      .join(" | ");
+
+    return `
+      <div class="mapping-row">
+        <div>
+          <strong>${escapeHtml(mapping.client)}</strong>
+          <small>${escapeHtml(mapping.address || "No address saved")}</small>
+        </div>
+        <code>${escapeHtml(coordinateText || `${first.lat}, ${first.lng}`)}</code>
+        <button type="button" data-remove-location="${escapeHtml(mapping.id)}">Remove</button>
+      </div>
+    `;
+  }).join("");
+
+  mappingList.querySelectorAll("[data-remove-location]").forEach((button) => {
+    button.addEventListener("click", () => removeLocationMapping(button.dataset.removeLocation));
+  });
+}
+
+function renderLocationIndicator(row) {
+  const detection = row.locationDetection;
+  if (!detection) return "";
+
+  const location = detection.location;
+  const sourceLabel = locationSource.value === "checkout" ? "Check-out" : "Check-in";
+  const coordinateText = `${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`;
+
+  if (detection.status === "matched") {
+    return `
+      <div class="location-note matched">
+        ${sourceLabel}: detected ${escapeHtml(detection.client)}
+        <span>${Math.round(detection.distance)}m away</span>
+      </div>
+    `;
+  }
+
+  if (detection.status === "ambiguous") {
+    const candidates = detection.candidates
+      .map((candidate) => `${candidate.client} ${Math.round(candidate.distance)}m`)
+      .join(", ");
+
+    return `
+      <div class="location-note warning">
+        Multiple nearby clients
+        <span>${escapeHtml(candidates)}</span>
+        <small>${escapeHtml(coordinateText)}</small>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="location-note unknown">
+      New location
+      <span>${escapeHtml(coordinateText)}</span>
+      ${location.address ? `<small>${escapeHtml(location.address)}</small>` : ""}
+    </div>
+  `;
+}
+
+async function performGeneration() {
   if (!state.reportRows.length) return;
   setStatus("Generating");
 
@@ -807,19 +1278,16 @@ function styleReport(sheet, lastRow) {
   sheet.getColumn(10).alignment = center;
 }
 
-function renderPreview() {
+function updateSummaryCounts() {
   const rows = state.reportRows;
   rowsFound.textContent = rows.length;
   holidaysFound.textContent = rows.filter((row) => row.client === "Holiday").length;
   remarksFound.textContent = rows.filter((row) => row.remarks).length;
+}
 
-  if (!rows.length) {
-    previewBody.innerHTML = '<tr><td colspan="9" class="empty">No usable rows were found in the workbook.</td></tr>';
-    return;
-  }
-
-  previewBody.innerHTML = rows.map((row) => `
-    <tr class="${
+function buildRowHtml(row) {
+  return `
+    <tr data-row-date="${escapeHtml(row.dateText)}" class="${
       (() => {
         if (row.rowStatus === "leave") {
           return "special-day leave-day";
@@ -903,6 +1371,7 @@ if (isCheckoutAlert) {
           value="${escapeHtml(row.client)}"
           placeholder="Client name"
         >
+        ${renderLocationIndicator(row)}
       `
   }
 </td>
@@ -927,59 +1396,45 @@ if (isCheckoutAlert) {
   }
 </td>
     </tr>
-  `).join("");
+  `;
+}
 
-  document.querySelectorAll(".row-client-input").forEach((input) => {
-  input.addEventListener("change", (event) => {
-    const key = event.target.dataset.date;
-    const value = event.target.value.trim();
+function renderPreview() {
+  const rows = state.reportRows;
+  updateSummaryCounts();
 
-    state.rowClientOverrides.set(key, value);
+  if (!rows.length) {
+    previewBody.innerHTML = '<tr><td colspan="9" class="empty">No usable rows were found in the workbook.</td></tr>';
+    return;
+  }
 
-    rebuildReportRows();
-    renderPreview();
-  });
-});
+  previewBody.innerHTML = rows.map(buildRowHtml).join("");
+}
 
-document.querySelectorAll(".row-remarks-input").forEach((input) => {
-  input.addEventListener("change", (event) => {
-    const key = event.target.dataset.date;
-    const value = event.target.value.trim();
+// Re-renders just the one row that changed, in place. Because every other
+// row's <tr> (and whatever the user just clicked into) is left completely
+// untouched in the DOM, this can't steal focus away from an in-progress
+// click the way a full-table re-render could.
+function updateSingleRow(key) {
+  const row = state.reportRows.find((reportRow) => reportRow.dateText === key);
+  if (!row) return;
 
-    if (value === "") {
-      state.rowRemarksOverrides.set(key, "");
-    } else {
-      state.rowRemarksOverrides.set(key, value);
+  let existingTr = null;
+  for (const tr of previewBody.querySelectorAll("tr[data-row-date]")) {
+    if (tr.dataset.rowDate === key) {
+      existingTr = tr;
+      break;
     }
+  }
 
-    rebuildReportRows();
+  if (!existingTr) {
     renderPreview();
-  });
-});
+    return;
+  }
 
-document.querySelectorAll(".row-timein-input").forEach((input) => {
-  input.addEventListener("change", (event) => {
-    const key = event.target.dataset.date;
-    const value = event.target.value.trim();
-
-    state.rowTimeInOverrides.set(key, value);
-
-    rebuildReportRows();
-    renderPreview();
-  });
-});
-
-document.querySelectorAll(".row-timeout-input").forEach((input) => {
-  input.addEventListener("change", (event) => {
-    const key = event.target.dataset.date;
-    const value = event.target.value.trim();
-
-    state.rowTimeOutOverrides.set(key, value);
-
-    rebuildReportRows();
-    renderPreview();
-  });
-});
+  const wrapper = document.createElement("tbody");
+  wrapper.innerHTML = buildRowHtml(row);
+  existingTr.replaceWith(wrapper.firstElementChild);
 }
 
 function parseExcelDate(value) {
@@ -1141,9 +1596,28 @@ function downloadBlob(blob, name) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function openMailDraft() {
-  const subject = `MIS Report - ${monthInputToDate(reportMonth.value).toLocaleString("en-US", { month: "long", year: "numeric" })}`;
-  const body = `Please find attached attendance.\r\n\r\nAttachment to add: ${state.generatedFileName}`;
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function openMailDraft() {
+  const monthLabel = monthInputToDate(reportMonth.value).toLocaleString("en-US", { month: "long", year: "numeric" });
+  const subject = `MIS Report - ${monthLabel}`;
+  const body = `Please find attached attendance for the month of ${monthLabel}.`;
+
+  const attached = await tryCreateGmailDraftViaApi(subject, body);
+  if (attached) return;
+
+  // Gmail's web compose URL has no attachment parameter — a webpage cannot
+  // pre-attach a file to it. The file was already downloaded once when you
+  // clicked Generate, so we don't re-download it here (that was creating a
+  // duplicate copy every time this button was clicked). Attach the file
+  // from wherever it landed the first time.
   const account = normalizeGmailAccount(gmailAccount.value);
   const isAccountNumber = /^\d+$/.test(account);
   const accountPath = isAccountNumber
@@ -1180,6 +1654,7 @@ function openMailDraft() {
     <body style="font-family: system-ui, sans-serif; padding: 24px; color: #17231e;">
       <strong>Opening Gmail draft...</strong>
       <p>If it does not open, <a href="${composeUrl}">click here</a>.</p>
+      <p>Attach ${escapeHtml(state.generatedFileName || "your MIS Excel file")} from wherever you saved it when you clicked Generate.</p>
     </body>
   `);
   draftWindow.document.close();
@@ -1190,6 +1665,160 @@ function openMailDraft() {
   }, 1200);
 }
 
+// Universal true auto-attach via the Gmail API: if a Gmail API Client ID is
+// configured (set up once, after this tool is hosted on a real web address —
+// see the hint text under the buttons), this signs the user in with Google
+// and creates the Gmail draft with the file genuinely attached server-side.
+// Works identically on any browser or device, since nothing depends on
+// browser-specific share features. Returns true if handled, false if no
+// Client ID is configured (or the API call failed) so the caller falls back
+// to the manual-attach Gmail compose window.
+let googleTokenClient = null;
+let googleTokenClientId = "";
+let googleAccessToken = "";
+let googleAccessTokenExpiry = 0;
+
+function getGoogleAccessToken(clientId) {
+  return new Promise((resolve, reject) => {
+    if (!window.google?.accounts?.oauth2) {
+      reject(new Error("Google Identity Services script not loaded."));
+      return;
+    }
+
+    if (googleAccessToken && Date.now() < googleAccessTokenExpiry - 30000) {
+      resolve(googleAccessToken);
+      return;
+    }
+
+    if (!googleTokenClient || googleTokenClientId !== clientId) {
+      googleTokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: "https://www.googleapis.com/auth/gmail.compose",
+        callback: () => {},
+      });
+      googleTokenClientId = clientId;
+    }
+
+    googleTokenClient.callback = (response) => {
+      if (response.error) {
+        reject(new Error(response.error));
+        return;
+      }
+      googleAccessToken = response.access_token;
+      googleAccessTokenExpiry = Date.now() + Number(response.expires_in || 3600) * 1000;
+      resolve(googleAccessToken);
+    };
+
+    googleTokenClient.requestAccessToken({ prompt: googleAccessToken ? "" : "consent" });
+  });
+}
+
+function toBase64Url(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function buildMimeMessage({ to, cc, subject, body, attachmentName, attachmentBase64, attachmentMimeType }) {
+  const boundary = `mis_boundary_${Date.now()}`;
+
+  const headers = [
+    `To: ${to}`,
+    cc ? `Cc: ${cc}` : null,
+    `Subject: ${subject}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+  ].filter(Boolean).join("\r\n");
+
+  const bodyPart = [
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    "Content-Transfer-Encoding: 7bit",
+    "",
+    body,
+    "",
+  ].join("\r\n");
+
+  const attachmentPart = [
+    `--${boundary}`,
+    `Content-Type: ${attachmentMimeType}; name="${attachmentName}"`,
+    "Content-Transfer-Encoding: base64",
+    `Content-Disposition: attachment; filename="${attachmentName}"`,
+    "",
+    attachmentBase64.replace(/(.{76})/g, "$1\r\n"),
+    "",
+  ].join("\r\n");
+
+  return [headers, "", bodyPart, attachmentPart, `--${boundary}--`].join("\r\n");
+}
+
+async function createGmailDraftWithAttachment({ accessToken, to, cc, subject, body, attachmentName, attachmentBlob }) {
+  const attachmentBase64 = await blobToBase64(attachmentBlob);
+  const mimeMessage = buildMimeMessage({
+    to,
+    cc,
+    subject,
+    body,
+    attachmentName,
+    attachmentBase64,
+    attachmentMimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+
+  const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ message: { raw: toBase64Url(mimeMessage) } }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gmail API error (${response.status}): ${await response.text()}`);
+  }
+
+  return response.json();
+}
+
+async function tryCreateGmailDraftViaApi(subject, body) {
+  if (!state.generatedBlob || !state.generatedFileName) return false;
+
+  const clientId = googleClientIdInput.value.trim();
+  if (!clientId) return false;
+
+  try {
+    setStatus("Connecting to Gmail");
+    const accessToken = await getGoogleAccessToken(clientId);
+
+    setStatus("Attaching file");
+    await createGmailDraftWithAttachment({
+      accessToken,
+      to: "jobs@skagrawal.co.in",
+      cc: "somnathsengupta@skagrawal.co.in,nikhil102422@gmail.com",
+      subject,
+      body,
+      attachmentName: state.generatedFileName,
+      attachmentBlob: state.generatedBlob,
+    });
+
+    const account = normalizeGmailAccount(gmailAccount.value);
+    const draftsUrl = /^\d+$/.test(account)
+      ? `https://mail.google.com/mail/u/${encodeURIComponent(account)}/#drafts`
+      : `https://mail.google.com/mail/#drafts?authuser=${encodeURIComponent(account)}`;
+
+    window.open(draftsUrl, "_blank", "noopener");
+    setStatus("Ready");
+    return true;
+  } catch (error) {
+    console.error("Gmail API draft failed", error);
+    setStatus("Ready");
+    return false;
+  }
+}
+
 function normalizeGmailAccount(value) {
   return String(value || "5")
     .trim()
@@ -1197,25 +1826,10 @@ function normalizeGmailAccount(value) {
     .replace(/^u\//i, "") || "5";
 }
 
+const THAWK_HR_URL = "https://thawksolution.com/MultipleCheckInCheckOut";
+
 function openThawkHr() {
-  const url = normalizeUrl(thawkHrUrl.value);
-
-  if (!url) {
-    alert("Enter your Thawk HR URL first.");
-    thawkHrUrl.focus();
-    return;
-  }
-
-  window.open(url, "_blank", "noopener");
-}
-
-function normalizeUrl(value) {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) return "";
-
-  return /^https?:\/\//i.test(trimmed)
-    ? trimmed
-    : `https://${trimmed}`;
+  window.open(THAWK_HR_URL, "_blank", "noopener");
 }
 
 function escapeHtml(value) {
