@@ -516,6 +516,25 @@ button + button:hover:not(:disabled),
   line-height: 1.4;
 }
 
+.mapping-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.mapping-actions .secondary-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+.file-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
 .mapping-list {
   display: grid;
   gap: 8px;

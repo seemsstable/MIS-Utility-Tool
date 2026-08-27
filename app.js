@@ -48,6 +48,8 @@ const openThawkBtn = document.querySelector("#openThawkBtn");
 const locationSource = document.querySelector("#locationSource");
 const mappingCount = document.querySelector("#mappingCount");
 const mappingList = document.querySelector("#mappingList");
+const exportMappingsBtn = document.querySelector("#exportMappingsBtn");
+const importMappingsInput = document.querySelector("#importMappingsInput");
 const removeAllRemarks = document.querySelector("#removeAllRemarks");
 
 const learnConfirmOverlay = document.querySelector("#learnConfirmOverlay");
@@ -85,6 +87,13 @@ learnConfirmSelectAll.addEventListener("click", () => setAllLearnCheckboxes(true
 learnConfirmSelectNone.addEventListener("click", () => setAllLearnCheckboxes(false));
 learnConfirmOverlay.addEventListener("click", (event) => {
   if (event.target === learnConfirmOverlay) closeLearnConfirmModal();
+});
+exportMappingsBtn.addEventListener("click", exportLocationMappings);
+importMappingsInput.addEventListener("change", async (event) => {
+  const [file] = event.target.files;
+  if (!file) return;
+  await importLocationMappings(file);
+  event.target.value = "";
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !learnConfirmOverlay.hidden) closeLearnConfirmModal();
@@ -848,6 +857,70 @@ function saveLocationMappings() {
     LOCATION_MAPPINGS_STORAGE_KEY,
     JSON.stringify(state.locationMappings)
   );
+}
+
+// localStorage is tied to the exact web address the tool is opened from —
+// switching from a local file to a hosted URL (or vice versa) starts with
+// empty storage, since the browser treats them as different origins. This
+// export/import pair lets you carry your learned locations across that
+// kind of move.
+function exportLocationMappings() {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    mappings: state.locationMappings,
+  };
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  downloadBlob(blob, `mis-location-mappings-${dateStamp}.json`);
+}
+
+async function importLocationMappings(file) {
+  let payload;
+
+  try {
+    const text = await file.text();
+    payload = JSON.parse(text);
+  } catch (error) {
+    alert("Could not read that file — make sure it's a location mappings backup exported from this tool.");
+    return;
+  }
+
+  const incoming = Array.isArray(payload) ? payload : payload?.mappings;
+
+  if (!Array.isArray(incoming)) {
+    alert("That file doesn't look like a location mappings backup.");
+    return;
+  }
+
+  let clientsTouched = 0;
+  let coordinatesAdded = 0;
+
+  incoming.forEach((mapping) => {
+    const client = String(mapping?.client || "").trim();
+    const coordinates = Array.isArray(mapping?.coordinates) ? mapping.coordinates : [];
+    if (!client || !coordinates.length) return;
+
+    clientsTouched += 1;
+
+    coordinates.forEach((coordinate) => {
+      if (!Number.isFinite(coordinate?.lat) || !Number.isFinite(coordinate?.lng)) return;
+
+      const before = state.locationMappings.find(
+        (existing) => existing.client.toLowerCase() === client.toLowerCase()
+      )?.coordinates.length || 0;
+
+      learnLocation(client, { lat: coordinate.lat, lng: coordinate.lng, address: mapping.address });
+
+      const after = state.locationMappings.find(
+        (existing) => existing.client.toLowerCase() === client.toLowerCase()
+      )?.coordinates.length || 0;
+
+      if (after > before) coordinatesAdded += 1;
+    });
+  });
+
+  alert(`Imported ${coordinatesAdded} location${coordinatesAdded === 1 ? "" : "s"} across ${clientsTouched} client${clientsTouched === 1 ? "" : "s"}. Existing saved locations were kept — this only adds to them.`);
 }
 
 // Silently teaches the location database: GPS -> Client.

@@ -134,9 +134,16 @@
         <div class="mapping-head">
           <div>
             <h2>Saved Location Mappings</h2>
-            <p>GPS coordinates learned from T-Hawk files for automatic client detection.</p>
+            <p>GPS coordinates learned from T-Hawk files for automatic client detection. These are stored per web address — export a backup before switching where you host or open this tool.</p>
           </div>
           <span id="mappingCount" class="status-pill">0 saved</span>
+        </div>
+        <div class="mapping-actions">
+          <button id="exportMappingsBtn" type="button" class="secondary-btn">Export Backup</button>
+          <label class="secondary-btn file-btn">
+            Import Backup
+            <input id="importMappingsInput" type="file" accept="application/json,.json" hidden>
+          </label>
         </div>
         <div id="mappingList" class="mapping-list">
           <div class="mapping-empty">No saved locations yet.</div>
