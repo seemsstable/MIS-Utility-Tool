@@ -44,12 +44,17 @@ const defaultClientName = document.querySelector("#defaultClientName");
 const defaultDeviceName = document.querySelector("#defaultDeviceName");
 const gmailAccount = document.querySelector("#gmailAccount");
 const googleClientIdInput = document.querySelector("#googleClientId");
+const googleAccountStatusEl = document.querySelector("#googleAccountStatus");
+const switchGoogleAccountBtn = document.querySelector("#switchGoogleAccountBtn");
 const openThawkBtn = document.querySelector("#openThawkBtn");
 const locationSource = document.querySelector("#locationSource");
 const mappingCount = document.querySelector("#mappingCount");
 const mappingList = document.querySelector("#mappingList");
 const exportMappingsBtn = document.querySelector("#exportMappingsBtn");
 const importMappingsInput = document.querySelector("#importMappingsInput");
+const githubSyncTokenInput = document.querySelector("#githubSyncToken");
+const syncNowBtn = document.querySelector("#syncNowBtn");
+const syncStatusEl = document.querySelector("#syncStatus");
 const removeAllRemarks = document.querySelector("#removeAllRemarks");
 
 const learnConfirmOverlay = document.querySelector("#learnConfirmOverlay");
@@ -94,6 +99,23 @@ importMappingsInput.addEventListener("change", async (event) => {
   if (!file) return;
   await importLocationMappings(file);
   event.target.value = "";
+});
+syncNowBtn.addEventListener("click", () => syncNow({ manual: true }));
+switchGoogleAccountBtn.addEventListener("click", async () => {
+  const clientId = googleClientIdInput.value.trim();
+  if (!clientId) {
+    alert("Enter a Gmail API Client ID first.");
+    return;
+  }
+
+  switchGoogleAccountBtn.disabled = true;
+  try {
+    await getGoogleAccessToken(clientId, { forceAccountPicker: true });
+  } catch (error) {
+    console.error("Account switch failed", error);
+  } finally {
+    switchGoogleAccountBtn.disabled = false;
+  }
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !learnConfirmOverlay.hidden) closeLearnConfirmModal();
@@ -141,6 +163,7 @@ defaultDeviceName.addEventListener("change", () => {
 
 gmailAccount.addEventListener("input", saveGlobalSettings);
 googleClientIdInput.addEventListener("input", saveGlobalSettings);
+githubSyncTokenInput.addEventListener("input", saveGlobalSettings);
 locationSource.addEventListener("change", () => {
   saveGlobalSettings();
   rebuildReportRows();
@@ -157,6 +180,13 @@ loadLocationMappings();
 loadSavedSettings();
 loadTheme();
 renderLocationMappings();
+
+// If a sync token is already saved (returning device), pull in anything
+// learned elsewhere as soon as the tool opens, then push up whatever this
+// device has that the cloud copy doesn't yet.
+if (githubSyncTokenInput.value.trim()) {
+  syncNow();
+}
 
 themeToggle.addEventListener("click", (event) => toggleTheme(event));
 
@@ -212,6 +242,7 @@ function saveGlobalSettings() {
       defaultDeviceName: defaultDeviceName.value,
       gmailAccount: gmailAccount.value,
       googleClientId: googleClientIdInput.value,
+      githubSyncToken: githubSyncTokenInput.value,
       locationSource: locationSource.value,
       removeAllRemarks: removeAllRemarks.checked
     })
@@ -242,6 +273,9 @@ function loadSavedSettings() {
 
     googleClientIdInput.value =
       settings.googleClientId || "";
+
+    githubSyncTokenInput.value =
+      settings.githubSyncToken || "";
 
     locationSource.value =
       settings.locationSource || locationSource.value;
@@ -893,6 +927,15 @@ async function importLocationMappings(file) {
     return;
   }
 
+  const { clientsTouched, coordinatesAdded } = mergeIncomingMappings(incoming);
+  alert(`Imported ${coordinatesAdded} location${coordinatesAdded === 1 ? "" : "s"} across ${clientsTouched} client${clientsTouched === 1 ? "" : "s"}. Existing saved locations were kept — this only adds to them.`);
+}
+
+// Shared by both file-based Import and GitHub Gist pull: merges an incoming
+// mappings array into state.locationMappings additively (never removes or
+// overwrites an existing coordinate), reusing the same per-coordinate
+// distance-dedupe as normal background learning.
+function mergeIncomingMappings(incoming) {
   let clientsTouched = 0;
   let coordinatesAdded = 0;
 
@@ -920,7 +963,154 @@ async function importLocationMappings(file) {
     });
   });
 
-  alert(`Imported ${coordinatesAdded} location${coordinatesAdded === 1 ? "" : "s"} across ${clientsTouched} client${clientsTouched === 1 ? "" : "s"}. Existing saved locations were kept — this only adds to them.`);
+  return { clientsTouched, coordinatesAdded };
+}
+
+// Automatic cross-device sync via a private GitHub Gist. Since this tool has
+// no server of its own, the Gist acts as free, simple cloud storage: every
+// device that has the same token pushes what it learns and pulls what other
+// devices learned, so location mappings stay current everywhere without any
+// manual file transfer.
+const GITHUB_GIST_FILENAME = "mis-tool-location-mappings.json";
+const GITHUB_GIST_DESCRIPTION = "MIS Attendance Tool — saved location mappings (do not rename this file)";
+
+let githubSyncPushTimer = null;
+
+function githubHeaders(token) {
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "Content-Type": "application/json",
+  };
+}
+
+async function findOrCreateSyncGist(token) {
+  const listResponse = await fetch("https://api.github.com/gists?per_page=100", {
+    headers: githubHeaders(token),
+  });
+
+  if (!listResponse.ok) {
+    throw new Error(`GitHub API error (${listResponse.status})`);
+  }
+
+  const gists = await listResponse.json();
+  const existing = gists.find((gist) => gist.files && gist.files[GITHUB_GIST_FILENAME]);
+  if (existing) return existing.id;
+
+  const createResponse = await fetch("https://api.github.com/gists", {
+    method: "POST",
+    headers: githubHeaders(token),
+    body: JSON.stringify({
+      description: GITHUB_GIST_DESCRIPTION,
+      public: false,
+      files: {
+        [GITHUB_GIST_FILENAME]: {
+          content: JSON.stringify({ mappings: [] }, null, 2),
+        },
+      },
+    }),
+  });
+
+  if (!createResponse.ok) {
+    throw new Error(`GitHub API error (${createResponse.status})`);
+  }
+
+  const created = await createResponse.json();
+  return created.id;
+}
+
+async function pullMappingsFromGist(token) {
+  const gistId = await findOrCreateSyncGist(token);
+  const response = await fetch(`https://api.github.com/gists/${gistId}`, {
+    headers: githubHeaders(token),
+  });
+
+  if (!response.ok) {
+    throw new Error(`GitHub API error (${response.status})`);
+  }
+
+  const gist = await response.json();
+  const content = gist.files?.[GITHUB_GIST_FILENAME]?.content;
+  if (!content) return;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch (error) {
+    return;
+  }
+
+  const incoming = Array.isArray(parsed) ? parsed : parsed?.mappings;
+  if (Array.isArray(incoming)) {
+    mergeIncomingMappings(incoming);
+  }
+}
+
+async function pushMappingsToGist(token) {
+  const gistId = await findOrCreateSyncGist(token);
+  const response = await fetch(`https://api.github.com/gists/${gistId}`, {
+    method: "PATCH",
+    headers: githubHeaders(token),
+    body: JSON.stringify({
+      files: {
+        [GITHUB_GIST_FILENAME]: {
+          content: JSON.stringify(
+            { syncedAt: new Date().toISOString(), mappings: state.locationMappings },
+            null,
+            2
+          ),
+        },
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`GitHub API error (${response.status})`);
+  }
+}
+
+async function syncNow(options = {}) {
+  const token = githubSyncTokenInput.value.trim();
+
+  if (!token) {
+    syncStatusEl.textContent = "Not connected";
+    if (options.manual) alert("Paste a GitHub token above first.");
+    return;
+  }
+
+  syncNowBtn.disabled = true;
+  syncStatusEl.textContent = "Syncing…";
+
+  try {
+    await pullMappingsFromGist(token);
+    await pushMappingsToGist(token);
+    syncStatusEl.textContent = `Synced ${new Date().toLocaleTimeString()}`;
+  } catch (error) {
+    console.error("GitHub sync failed", error);
+    syncStatusEl.textContent = "Sync failed — check token";
+    if (options.manual) alert("Sync failed. Double-check the token has the 'gist' scope and hasn't expired.");
+  } finally {
+    syncNowBtn.disabled = false;
+  }
+}
+
+// Debounced auto-push: called every time a location is learned in the
+// background, so a burst of edits (e.g. confirming a whole month at
+// Generate time) results in one push shortly after, not one per row.
+function scheduleGithubPush() {
+  const token = githubSyncTokenInput.value.trim();
+  if (!token) return;
+
+  clearTimeout(githubSyncPushTimer);
+  githubSyncPushTimer = setTimeout(async () => {
+    try {
+      await pushMappingsToGist(token);
+      syncStatusEl.textContent = `Synced ${new Date().toLocaleTimeString()}`;
+    } catch (error) {
+      console.error("GitHub auto-sync failed", error);
+      syncStatusEl.textContent = "Sync failed — check token";
+    }
+  }, 1500);
 }
 
 // Silently teaches the location database: GPS -> Client.
@@ -936,6 +1126,8 @@ function learnLocation(client, location) {
     (mapping) => mapping.client.toLowerCase() === trimmedClient.toLowerCase()
   );
 
+  let changed = false;
+
   if (existing) {
     const alreadySaved = existing.coordinates.some(
       (coordinate) => distanceMeters(location, coordinate) < 8
@@ -943,6 +1135,7 @@ function learnLocation(client, location) {
 
     if (!alreadySaved) {
       existing.coordinates.push({ lat: location.lat, lng: location.lng });
+      changed = true;
     }
 
     if (!existing.address && location.address) {
@@ -955,10 +1148,12 @@ function learnLocation(client, location) {
       address: location.address || "",
       coordinates: [{ lat: location.lat, lng: location.lng }],
     });
+    changed = true;
   }
 
   saveLocationMappings();
   renderLocationMappings();
+  if (changed) scheduleGithubPush();
 }
 
 // Looks up the raw (undetected) T-Hawk coordinate for a given report date
@@ -1081,6 +1276,7 @@ function removeLocationMapping(id) {
   renderLocationMappings();
   rebuildReportRows();
   renderPreview();
+  scheduleGithubPush();
 }
 
 function renderLocationMappings() {
@@ -1702,7 +1898,7 @@ async function openMailDraft() {
     fs: "1",
     tf: "1",
     to: "jobs@skagrawal.co.in",
-    cc: "somnathsengupta@skagrawal.co.in,nikhil102422@gmail.com",
+    cc: "somnathsengupta@skagrawal.co.in,nikhil102422@gmail.com,debojyoti@skagrawal.co.in",
     su: subject,
     body,
   });
@@ -1751,14 +1947,16 @@ let googleTokenClientId = "";
 let googleAccessToken = "";
 let googleAccessTokenExpiry = 0;
 
-function getGoogleAccessToken(clientId) {
+let googleConnectedEmail = "";
+
+function getGoogleAccessToken(clientId, { forceAccountPicker = false } = {}) {
   return new Promise((resolve, reject) => {
     if (!window.google?.accounts?.oauth2) {
       reject(new Error("Google Identity Services script not loaded."));
       return;
     }
 
-    if (googleAccessToken && Date.now() < googleAccessTokenExpiry - 30000) {
+    if (!forceAccountPicker && googleAccessToken && Date.now() < googleAccessTokenExpiry - 30000) {
       resolve(googleAccessToken);
       return;
     }
@@ -1766,24 +1964,60 @@ function getGoogleAccessToken(clientId) {
     if (!googleTokenClient || googleTokenClientId !== clientId) {
       googleTokenClient = google.accounts.oauth2.initTokenClient({
         client_id: clientId,
-        scope: "https://www.googleapis.com/auth/gmail.compose",
+        scope: "https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/userinfo.email",
         callback: () => {},
       });
       googleTokenClientId = clientId;
     }
 
-    googleTokenClient.callback = (response) => {
+    googleTokenClient.callback = async (response) => {
       if (response.error) {
         reject(new Error(response.error));
         return;
       }
       googleAccessToken = response.access_token;
       googleAccessTokenExpiry = Date.now() + Number(response.expires_in || 3600) * 1000;
+      await refreshConnectedGoogleAccountLabel();
       resolve(googleAccessToken);
     };
 
-    googleTokenClient.requestAccessToken({ prompt: googleAccessToken ? "" : "consent" });
+    // Always show the account picker on a fresh/forced sign-in — never
+    // silently reuse whichever Google account happens to be the browser's
+    // default, so the draft always lands where you actually intend.
+    const needsPicker = forceAccountPicker || !googleAccessToken;
+    googleTokenClient.requestAccessToken({
+      prompt: needsPicker ? "select_account consent" : "",
+    });
   });
+}
+
+async function refreshConnectedGoogleAccountLabel() {
+  if (!googleAccessToken) {
+    googleConnectedEmail = "";
+    updateGoogleAccountStatus();
+    return;
+  }
+
+  try {
+    const response = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: { Authorization: `Bearer ${googleAccessToken}` },
+    });
+    if (!response.ok) throw new Error(`userinfo error ${response.status}`);
+    const info = await response.json();
+    googleConnectedEmail = info.email || "";
+  } catch (error) {
+    console.error("Could not fetch connected Google account", error);
+    googleConnectedEmail = "";
+  }
+
+  updateGoogleAccountStatus();
+}
+
+function updateGoogleAccountStatus() {
+  if (!googleAccountStatusEl) return;
+  googleAccountStatusEl.textContent = googleConnectedEmail
+    ? `Connected as ${googleConnectedEmail}`
+    : "Not connected yet";
 }
 
 function toBase64Url(str) {
@@ -1867,22 +2101,30 @@ async function tryCreateGmailDraftViaApi(subject, body) {
     const accessToken = await getGoogleAccessToken(clientId);
 
     setStatus("Attaching file");
-    await createGmailDraftWithAttachment({
+    const draft = await createGmailDraftWithAttachment({
       accessToken,
       to: "jobs@skagrawal.co.in",
-      cc: "somnathsengupta@skagrawal.co.in,nikhil102422@gmail.com",
+      cc: "somnathsengupta@skagrawal.co.in,nikhil102422@gmail.com,debojyoti@skagrawal.co.in",
       subject,
       body,
       attachmentName: state.generatedFileName,
       attachmentBlob: state.generatedBlob,
     });
 
-    const account = normalizeGmailAccount(gmailAccount.value);
-    const draftsUrl = /^\d+$/.test(account)
-      ? `https://mail.google.com/mail/u/${encodeURIComponent(account)}/#drafts`
-      : `https://mail.google.com/mail/#drafts?authuser=${encodeURIComponent(account)}`;
+    const messageId = draft?.message?.id;
 
-    window.open(draftsUrl, "_blank", "noopener");
+    // Address Gmail by the actual signed-in email, not a numeric u/N slot —
+    // those slots are assigned per-browser-session and can shift around, so
+    // guessing one (even one you picked deliberately) isn't reliable. Google
+    // resolves ?authuser=<email> to the correct slot automatically. Fall
+    // back to the numeric "Gmail account" field only if, for some reason,
+    // we don't have the connected email on hand.
+    const authUser = googleConnectedEmail || normalizeGmailAccount(gmailAccount.value);
+    const draftUrl = messageId
+      ? `https://mail.google.com/mail/?authuser=${encodeURIComponent(authUser)}#drafts?compose=${messageId}`
+      : `https://mail.google.com/mail/?authuser=${encodeURIComponent(authUser)}#drafts`;
+
+    window.open(draftUrl, "_blank", "noopener");
     setStatus("Ready");
     return true;
   } catch (error) {

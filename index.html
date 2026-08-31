@@ -79,6 +79,11 @@
             >
           </label>
 
+          <div class="wide-field google-account-row">
+            <span id="googleAccountStatus" class="status-pill">Not connected yet</span>
+            <button id="switchGoogleAccountBtn" type="button" class="secondary-btn">Switch Google Account</button>
+          </div>
+
           <label>
             Location Source
             <select id="locationSource">
@@ -99,8 +104,13 @@
           <button id="mailBtn" type="button" disabled>Open Email Draft</button>
         </div>
 
+        <p class="thawk-fallback-hint">
+          Got a server error on that page? It usually means you're not logged into Thawk in this browser yet —
+          <a id="openThawkHomeLink" href="https://thawksolution.com/" target="_blank" rel="noopener">open the Thawk login page</a> instead, then try Open Thawk HR again.
+        </p>
+
         <p class="gmail-api-hint">
-          Leave <strong>Gmail API Client ID</strong> blank to keep the current behaviour (download once, then attach manually in the Gmail compose window that opens). Fill it in once this tool is hosted on a real web address (e.g. GitHub Pages) to have <strong>Open Email Draft</strong> create the Gmail draft with the file already attached — works the same on any browser or device.
+          Leave <strong>Gmail API Client ID</strong> blank to keep the current behaviour (download once, then attach manually in the Gmail compose window that opens). Fill it in once this tool is hosted on a real web address (e.g. GitHub Pages) to have <strong>Open Email Draft</strong> create the Gmail draft with the file already attached — works the same on any browser or device. The draft always lands in whichever Google account you sign into in the popup, shown above as "Connected as..." — not the "Gmail account" field, which is only used for the manual fallback link. Use <strong>Switch Google Account</strong> any time to pick a different one.
         </p>
       </div>
 
@@ -134,10 +144,23 @@
         <div class="mapping-head">
           <div>
             <h2>Saved Location Mappings</h2>
-            <p>GPS coordinates learned from T-Hawk files for automatic client detection. These are stored per web address — export a backup before switching where you host or open this tool.</p>
+            <p>GPS coordinates learned from T-Hawk files for automatic client detection. Stored per browser/device — set up sync below to keep every device current automatically, or use Export/Import for a one-off transfer.</p>
           </div>
           <span id="mappingCount" class="status-pill">0 saved</span>
         </div>
+
+        <label class="wide-field mapping-sync-field">
+          GitHub Sync Token <small>(optional — enables automatic cross-device sync, see below)</small>
+          <input id="githubSyncToken" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+        </label>
+        <div class="mapping-sync-row">
+          <button id="syncNowBtn" type="button" class="secondary-btn">Sync Now</button>
+          <span id="syncStatus" class="status-pill">Not connected</span>
+        </div>
+        <p class="gmail-api-hint">
+          Create a token at <strong>github.com/settings/tokens</strong> with only the <strong>gist</strong> scope checked (classic token), paste it here, and do the same on your other device with the exact same token. From then on, every location this tool learns is pushed to a private Gist in your GitHub account automatically, and pulled in whenever you open the tool — no files to send yourself.
+        </p>
+
         <div class="mapping-actions">
           <button id="exportMappingsBtn" type="button" class="secondary-btn">Export Backup</button>
           <label class="secondary-btn file-btn">
